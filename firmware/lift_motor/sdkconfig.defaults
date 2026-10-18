@@ -1,0 +1,22 @@
+# Console on UART0, i.e. the board's UART-bridge USB port (CH343/CP2102).
+# If you move the cable to the S3's native USB port, swap these two lines:
+#   CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# then delete sdkconfig and rebuild. main.c follows this setting automatically.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# Board has 16 MB flash (verified with `esptool flash-id`). The default 2 MB
+# setting would leave most of it unusable.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Custom table: the 1 MB default app partition cannot hold Wi-Fi + NimBLE.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Bluetooth LE via NimBLE. NimBLE rather than Bluedroid: roughly half the flash
+# and RAM, and the dock only needs a peripheral role with a handful of
+# characteristics. The S3 has BLE only -- there is no Bluetooth Classic.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2

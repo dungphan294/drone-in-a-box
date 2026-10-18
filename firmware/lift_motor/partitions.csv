@@ -1,0 +1,12 @@
+# Dock controller partition table. Board: ESP32-S3 with 16 MB flash (verified
+# 2026-10-15 with `esptool flash-id`: manufacturer 68, device 4018).
+#
+# The 1 MB default app partition could not hold Wi-Fi + NimBLE together. 4 MB
+# gives the full BLE + Wi-Fi build generous headroom, and ~11 MB stays
+# unallocated so OTA slots or a data partition can be added later without
+# moving anything that already exists.
+#
+# Name,     Type, SubType,  Offset,   Size,    Flags
+nvs,        data, nvs,      0x9000,   0x10000,
+phy_init,   data, phy,      0x19000,  0x1000,
+factory,    app,  factory,  0x20000,  0x400000,
