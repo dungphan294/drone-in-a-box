@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Verify that all three implementations of the dock wire format agree.
 #
-#   firmware/lift_motor/components/auth/auth.c     (C, on the dock)
-#   firmware/lift_motor/tools/dock_cli.py          (Python, bench client)
+#   firmware/drone_box/components/auth/auth.c     (C, on the dock)
+#   firmware/drone_box/tools/dock_cli.py          (Python, bench client)
 #   app/wire/.../DockCrypto.kt                     (Kotlin, the app)
 #   firmware/.../webserver/index.html              (JavaScript, the setup page)
 #
@@ -38,8 +38,8 @@ HTTP_VECTOR='4:POST8:/api/cmd3:c=e1:7'
 BLOB_VECTOR='3:BLE14:/ble/provision10:net'          # NUL follows; grep stops there
 FRAME_BYTES='41'                                     # 8 nonce + 32 sig + 1 payload
 
-C_TEST="firmware/lift_motor/test/host/test_auth.c"
-PY_CLI="firmware/lift_motor/tools/dock_cli.py"
+C_TEST="firmware/drone_box/test/host/test_auth.c"
+PY_CLI="firmware/drone_box/tools/dock_cli.py"
 KT_TEST="app/wire/src/commonTest/kotlin/box/dock/DockCryptoTest.kt"
 
 echo
@@ -95,7 +95,7 @@ fi
 echo
 echo "JavaScript (setup page)"
 
-PAGE="firmware/lift_motor/components/webserver/index.html"
+PAGE="firmware/drone_box/components/webserver/index.html"
 if ! command -v node >/dev/null 2>&1; then
     skip "node not installed; cannot exercise the page's crypto"
 elif [ ! -f "$PAGE" ]; then
@@ -135,7 +135,7 @@ fi
 echo
 echo "C host tests"
 
-FW="$ROOT/firmware/lift_motor"
+FW="$ROOT/firmware/drone_box"
 if [ -x "$FW/build-host/test_auth" ]; then
     if (cd "$FW" && ctest --test-dir build-host --output-on-failure >/dev/null 2>&1); then
         pass "auth + command suites"
