@@ -34,6 +34,9 @@ static SemaphoreHandle_t  s_lock;
 static volatile bool s_running;
 static size_t        s_phase;               // index into PHASE[], kept across runs
 static uint64_t      s_steps;
+// Read without the lock by the status path, same as s_running: a single enum
+// whose only two values are both valid to observe.
+static volatile stepper_dir_t s_dir = STEPPER_CW;
 
 // The lock exists for one race. esp_timer_stop() does not wait for a callback
 // that has already been dispatched, so without it a tick could write a phase
@@ -58,7 +61,11 @@ static void tick(void *arg)
     (void)arg;
     LOCK();
     if (s_running) {
-        s_phase = (s_phase + 1) % STEPPER_PHASES;
+        // Counter-clockwise adds PHASES-1 rather than subtracting 1: s_phase
+        // is unsigned, so 0 - 1 would wrap to SIZE_MAX before the modulo ever
+        // saw it. Adding the modulus less one is the same step backwards.
+        s_phase = (s_phase + (s_dir == STEPPER_CW ? 1u : STEPPER_PHASES - 1u))
+                  % STEPPER_PHASES;
         write_phase(PHASE[s_phase]);
         s_steps++;
     }
@@ -85,22 +92,29 @@ void stepper_motor_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&args, &s_timer));
 }
 
-bool stepper_motor_start(void)
+stepper_start_t stepper_motor_start(stepper_dir_t dir)
 {
-    bool started = false;
+    stepper_start_t result;
 
     LOCK();
-    if (!s_running) {
+    if (s_running) {
+        // Already turning. Reversing needs nothing but the new direction: the
+        // next tick walks the sequence the other way from wherever it is, so
+        // there is no timer to restart and no phase to re-energise.
+        result = (s_dir == dir) ? STEPPER_UNCHANGED : STEPPER_REVERSED;
+        s_dir  = dir;
+    } else {
+        s_dir     = dir;
         s_running = true;
         s_steps   = 0;
         // Energise the phase it was left on, so the first tick is a real step
         // rather than a jump from released coils.
         write_phase(PHASE[s_phase]);
         ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer, STEPPER_STEP_INTERVAL_US));
-        started = true;
+        result = STEPPER_STARTED;
     }
     UNLOCK();
-    return started;
+    return result;
 }
 
 bool stepper_motor_stop(void)
@@ -118,7 +132,13 @@ bool stepper_motor_stop(void)
     return stopped;
 }
 
-bool stepper_motor_running(void) { return s_running; }
+bool          stepper_motor_running(void) { return s_running; }
+stepper_dir_t stepper_motor_dir(void)     { return s_dir; }
+
+const char *stepper_motor_dir_name(stepper_dir_t dir)
+{
+    return dir == STEPPER_CW ? "clockwise" : "counter-clockwise";
+}
 
 // Under the lock: a 64-bit counter is two loads on a 32-bit core, and a tick
 // landing between them would report a step count that never existed.

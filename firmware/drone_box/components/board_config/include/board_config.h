@@ -56,6 +56,11 @@
 #define BOARD_STEPPER_IN3          17
 #define BOARD_STEPPER_IN4          18
 
+// Which way is "clockwise" is not configured here: it is whichever way the
+// phase sequence turns your motor, which depends on the coil wiring and on
+// which end of the shaft you are looking at. If c and w come out swapped,
+// swap one coil pair at the driver rather than editing the sequence.
+//
 // From the motor's nameplate: a 1.8-degree stepper is 200. Full-step only --
 // stepper_motor.c walks a four-phase sequence, so this is whole steps per
 // revolution, not microsteps.

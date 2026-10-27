@@ -31,11 +31,37 @@
 // it was: 60 s / 200 steps / 100 rpm = 3000 us per step.
 #define STEPPER_STEP_INTERVAL_US  (60UL * 1000000UL / STEPPER_STEPS_PER_REV / STEPPER_RPM)
 
+// Which way the phase sequence is walked. Clockwise walks it forwards, which
+// is the direction the Arduino sketch's `motor.step(+200)` turned.
+//
+// Whether that is clockwise *at the output shaft* depends on how the coils are
+// wired and which end you are looking at. If CW and CCW come out swapped on
+// your motor, swap one coil pair at the driver (IN1 with IN2, say) rather than
+// editing the sequence: the sequence is the Arduino library's and is the one
+// thing in here that should not drift.
+typedef enum {
+    STEPPER_CW  = +1,
+    STEPPER_CCW = -1,
+} stepper_dir_t;
+
+// What a start request actually did, so the caller can say so precisely
+// instead of guessing from a bool.
+typedef enum {
+    STEPPER_STARTED,     // was idle, now turning in the requested direction
+    STEPPER_REVERSED,    // was already turning, the other way
+    STEPPER_UNCHANGED,   // already turning that way; nothing to do
+} stepper_start_t;
+
 void stepper_motor_init(void);
 
-// Turn continuously until stopped. Returns false, changing nothing, when it is
-// already running -- so a repeated tap on the web button is not an error.
-bool stepper_motor_start(void);
+// Turn continuously in `dir` until stopped.
+//
+// Asking for the direction it is already turning is not an error -- a repeated
+// tap on a web button returns STEPPER_UNCHANGED. Asking for the opposite
+// direction reverses it where it stands: the sequence is simply walked the
+// other way from the phase it is on. There is no ramp, so under load a
+// reversal can slip steps, and nothing here detects that.
+stepper_start_t stepper_motor_start(stepper_dir_t dir);
 
 // Stop and release the coils. Returns false when it was already idle.
 //
@@ -45,9 +71,19 @@ bool stepper_motor_start(void);
 // not need. The cost is that the shaft is free to be turned by hand when off.
 bool stepper_motor_stop(void);
 
-bool     stepper_motor_running(void);
+bool stepper_motor_running(void);
 
-// Steps taken since the current run started, for the status page. Reset by
-// stepper_motor_start(), not by stop, so the count survives being read after
-// the motor has stopped.
+// The direction it is turning, or the one it last turned, when stopped.
+stepper_dir_t stepper_motor_dir(void);
+
+// "clockwise" / "counter-clockwise", for logs and replies.
+const char *stepper_motor_dir_name(stepper_dir_t dir);
+
+// Steps taken since the current run started, for the status page.
+//
+// A count of steps taken, NOT net rotation: a reversal keeps adding to it
+// rather than winding it back, because what it answers is "how long has this
+// been turning", and with no feedback there is nothing to call a position.
+// Reset by a start from idle, not by a reversal and not by stop, so the count
+// survives being read after the motor has stopped.
 uint64_t stepper_motor_steps(void);

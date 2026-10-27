@@ -9,10 +9,15 @@ command_t command_parse(uint8_t c)
         return (command_t){ CMD_LEVEL_END, (int)c };
     case 'A': case 'B':
         return (command_t){ CMD_RAW_HOLD, (int)c };
-    case 'n': case 'f':
-        // oN and oFf. Not 'o': on a serial console 'o' and '0' are one
-        // keystroke apart and '0' means full speed, which is the last thing
-        // you want a mistyped stepper command to do.
+    case 'c': case 'w': case 'f':
+        // Clockwise, counter-clockWise, oFf.
+        //
+        // Not 'o' for on: on a console 'o' and '0' are one keystroke apart and
+        // '0' means full speed, which is the last thing a mistyped stepper
+        // command should do. Not 'n'/'m' for the two directions either -- they
+        // are keyboard neighbours, and the typo that reverses a running motor
+        // is the one worth designing out. 'c' and 'w' are three keys apart and
+        // read the way CW/CCW does.
         return (command_t){ CMD_STEPPER, (int)c };
     case '+':
         return (command_t){ CMD_LEVEL_STEP, +1 };
@@ -60,7 +65,8 @@ bool command_energises_actuator(command_t cmd)
 
 bool command_energises_stepper(command_t cmd)
 {
-    return cmd.kind == CMD_STEPPER && cmd.value == 'n';
+    // Either direction energises it; 'f' is the only CMD_STEPPER that does not.
+    return cmd.kind == CMD_STEPPER && (cmd.value == 'c' || cmd.value == 'w');
 }
 
 int speed_clamp(int pct)

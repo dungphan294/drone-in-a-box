@@ -41,7 +41,8 @@ static void test_parse_levels_and_modes(void)
     assert_cmd('d', CMD_DECAY_TOGGLE,  0);
     assert_cmd('A', CMD_RAW_HOLD,     'A');
     assert_cmd('B', CMD_RAW_HOLD,     'B');
-    assert_cmd('n', CMD_STEPPER,      'n');  // stepper on
+    assert_cmd('c', CMD_STEPPER,      'c');  // stepper on, clockwise
+    assert_cmd('w', CMD_STEPPER,      'w');  // stepper on, counter-clockwise
     assert_cmd('f', CMD_STEPPER,      'f');  // stepper off
     assert_cmd('K', CMD_REVEAL_KEY,    0);   // serial-only bench affordance
     assert_cmd('W', CMD_PROVISION,     0);   // serial-only, interactive
@@ -65,6 +66,8 @@ static void test_parse_ignores_noise(void)
     assert_cmd(' ',  CMD_IGNORE, 0);
     assert_cmd('z',  CMD_IGNORE, 0);
     assert_cmd('o',  CMD_IGNORE, 0);        // 'o' is not stepper-on: see command.c
+    assert_cmd('n',  CMD_IGNORE, 0);        // 'n'/'m' were rejected as neighbours
+    assert_cmd('m',  CMD_IGNORE, 0);
     assert_cmd('E',  CMD_IGNORE, 0);        // case matters: 'E' is not 'e'
     assert_cmd(0x00, CMD_IGNORE, 0);
     assert_cmd(0xFF, CMD_IGNORE, 0);
@@ -117,12 +120,14 @@ static void test_stop_and_queries_are_never_blocked(void)
 
 static void test_the_two_sides_never_overlap(void)
 {
-    // Turning the stepper on is the only command on the stepper's side, and no
-    // command is on both -- if one ever were, the interlock would deadlock
-    // itself, refusing a command because of the state it would itself create.
-    TEST_ASSERT_TRUE(energises_stepper('n'));
+    // Both directions are on the stepper's side and no command is on both --
+    // if one ever were, the interlock would deadlock itself, refusing a
+    // command because of the state it would itself create.
+    TEST_ASSERT_TRUE(energises_stepper('c'));       // clockwise
+    TEST_ASSERT_TRUE(energises_stepper('w'));       // counter-clockwise
     TEST_ASSERT_FALSE(energises_stepper('f'));      // off: always allowed
-    TEST_ASSERT_FALSE(energises_actuator('n'));
+    TEST_ASSERT_FALSE(energises_actuator('c'));
+    TEST_ASSERT_FALSE(energises_actuator('w'));
     TEST_ASSERT_FALSE(energises_actuator('f'));
 
     for (int c = 0; c < 256; c++) {

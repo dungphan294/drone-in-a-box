@@ -36,7 +36,7 @@ typedef enum {
     CMD_LEVEL_SHOW,
     CMD_DECAY_TOGGLE,
     CMD_RAW_HOLD,       // value: 'A' or 'B'
-    CMD_STEPPER,        // value: 'n' turn on (run continuously), 'f' turn off
+    CMD_STEPPER,        // value: 'c' on clockwise, 'w' on counter-clockwise, 'f' off
     CMD_REVEAL_KEY,     // 'K' -- bench affordance, see controller_reveal_key()
     CMD_PROVISION,      // 'W' -- interactive, serial only
     CMD_FORGET_WIFI,    // 'X'

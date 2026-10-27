@@ -210,8 +210,9 @@ def main() -> int:
         return 0
 
     # "spf" are the commands that cannot start anything: stop, the level query,
-    # and the stepper's off. 'n' is deliberately NOT in the set -- it starts the
-    # stepper, so it needs --yes like any other command that moves a motor.
+    # and the stepper's off. 'c' and 'w' are deliberately NOT in the set -- they
+    # start the stepper, so they need --yes like any other command that moves a
+    # motor, and so does the reversal that either one performs while it runs.
     moving = args.action == "deadman" or (args.action == "cmd" and args.char not in "spf")
     if moving and not args.yes:
         print("This can move a motor. Re-run with --yes.", file=sys.stderr)

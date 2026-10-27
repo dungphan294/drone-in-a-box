@@ -47,7 +47,8 @@ the `StepperMotorTest` sketch had it.
 | GPIO18 | IN4 | |
 | GND | GND | Common with the ESP32 and the driver supply |
 
-**200 steps/rev at 100 RPM**, full-step, both coils energised in every phase —
+**200 steps/rev at 100 RPM**, full-step, either direction, both coils energised
+in every phase —
 the Arduino `Stepper` library's four-pin sequence, unchanged. Stopping
 **releases all four pins** rather than holding the last phase: full-step would
 otherwise sit at rated current indefinitely, heating the windings and the
@@ -146,7 +147,8 @@ The default lives in [`sdkconfig.defaults`](sdkconfig.defaults).
 | `t` | Top: drive to the fully **extended** end, set level 5 |
 | `+` / `-` | Move one level and stop |
 | `p` | Print the current level |
-| `n` | Stepper **on** — turns continuously until stopped |
+| `c` | Stepper on, **clockwise** — turns continuously until stopped |
+| `w` | Stepper on, **counter-clockwise** |
 | `f` | Stepper **off** — stops and releases the coils |
 | `d` | Toggle decay mode (slow ⇄ fast) |
 | `A` | Diagnostic: hold GPIO4 at full scale, GPIO5 low |
@@ -155,10 +157,34 @@ The default lives in [`sdkconfig.defaults`](sdkconfig.defaults).
 Anything else is ignored, including CR and LF. Each accepted command echoes the
 duty LEDC actually holds, e.g. `Direction: e, speed: 100%  [A=256 B=0]`.
 
-`n` and `f` are oN and oFf. Not `o`: on a serial console `o` and `0` are one
-keystroke apart and `0` means full speed, which is the last thing a mistyped
-stepper command should do. Pressing `n` while the stepper already runs reports
-its state (`Stepper: on, 100 rpm, 4521 steps`), so it doubles as the query key.
+`c`, `w`, `f` are clockwise, counter-clockWise, oFf. Pressing the direction it
+is already turning reports its state (`Stepper: on clockwise, 100 rpm, 4521
+steps`), so it doubles as the query key; pressing the **other** direction
+reverses it where it stands.
+
+Two letters that were rejected, because the typo matters more than the
+mnemonic. Not `o` for "on": `o` and `0` are one keystroke apart and `0` means
+full speed. Not `n`/`m` for the two directions: they are keyboard neighbours,
+and the slip that reverses a running motor is the one worth designing out.
+`c` and `w` are three keys apart.
+
+### Reversing
+
+Either direction command starts the stepper from idle. Pressing the opposite
+one while it runs **reverses it in place**: the phase sequence is simply walked
+the other way from whatever phase it is on, so there is no timer to restart and
+no re-energising.
+
+There is no ramp, which is the honest cost — an abrupt reversal under load can
+slip steps, and being open-loop, nothing here detects that. The step counter
+keeps counting up through a reversal rather than winding back, because what it
+answers is "how long has this been turning"; with no feedback there is nothing
+to call a position.
+
+Which way the shaft actually goes depends on the coil wiring and which end you
+look at. If `c` and `w` come out swapped, **swap one coil pair at the driver**
+(IN1 with IN2, say) rather than editing the phase table — the table is the
+Arduino library's and is the one thing in there that should not drift.
 
 ## The interlock
 
@@ -169,7 +195,7 @@ rather than trusting a client to:
 | State | Then | Result |
 | --- | --- | --- |
 | Stepper running | `e`, `r`, `h`, `t`, `+`, `-`, `A`, `B` | `Stepper is running -- press f to stop it first` |
-| Actuator energised | `n` | `Actuator is energised (e, A=256 B=129) -- press s first` |
+| Actuator energised | `c`, `w` | `Actuator is energised (e, A=256 B=129) -- press s first` |
 | Either | `s` | Stops **both** |
 | Either | `f`, `p`, `d`, speed keys | Allowed — none of them energises anything |
 
@@ -238,8 +264,11 @@ Joining your phone's hotspot is the useful case: the dock gets a network, and
 AP awkward to use from a phone in the first place.
 
 The page has four control groups — **Position** (home, step, top), **Manual**
-(retract, STOP, extend), **Stepper** (**Turn on** / **Turn off**) and **Speed**
-— plus a status table and the Wi-Fi setup card.
+(retract, STOP, extend), **Stepper** (**↻ Clockwise** / **↺ Counter** /
+**Turn off**) and **Speed** — plus a status table and the Wi-Fi setup card.
+
+Only the direction the stepper is already turning greys out, so the other
+button stays live and is how you reverse it.
 
 The interlock is reflected in the buttons as well as enforced by the dock:
 while the stepper runs, the actuator buttons grey out, and while the actuator
@@ -475,7 +504,7 @@ property that makes them testable.
 | `board_config` | `BOARD_*` constants only; no code, no link dependency | nothing |
 | `command` | `command_parse()`, `command_energises_actuator/stepper()`, `speed_clamp()`, `speed_is_clamped()`, `speed_to_duty()`, `level_step_valid()`, `command_url_decode()` | `board_config` |
 | `actuator` | `actuator_init/set/hold_raw/set_slow_decay/slow_decay/is_driving`, duty, frequency and pin-name getters | `command`, `board_config`, LEDC, GPIO |
-| `stepper_motor` | `stepper_motor_init/start/stop/running/steps` | `board_config`, GPIO, `esp_timer` |
+| `stepper_motor` | `stepper_motor_init/start/stop/running/dir/dir_name/steps` | `board_config`, GPIO, `esp_timer` |
 | `positioner` | `positioner_init/complete/go_end/step/cancel/level/moving` | `actuator`, `board_config`, `esp_timer` |
 | `controller` | `controller_init/handle/status_json/emergency_stop/reveal_key` | `command`, `actuator`, `stepper_motor`, `positioner`, `secrets` |
 | `auth` | `auth_init()`, `auth_canonical()`, `auth_canonical_blob()`, `auth_verify()`, `auth_verify_blob()`, `auth_nonce_acceptable()`, `auth_equal_ct()` | nothing |
@@ -662,9 +691,9 @@ the CMake file fails with a clear message if it is not.
 | ID | Test | Asserts |
 | --- | --- | --- |
 | U01 | `test_parse_directions` | `e`/`r`/`s` map to `CMD_DIRECTION` with the right value |
-| U02 | `test_parse_levels_and_modes` | `h`,`t`,`+`,`-`,`p`,`d`,`A`,`B`,`n`,`f` map correctly |
+| U02 | `test_parse_levels_and_modes` | `h`,`t`,`+`,`-`,`p`,`d`,`A`,`B`,`c`,`w`,`f` map correctly |
 | U03 | `test_parse_digits` | Digits map to percent; `0` is **100 %**, not 0 % |
-| U04 | `test_parse_ignores_noise` | CR, LF, space, `z`, `E`, `o`, `0x00`, `0xFF` are ignored — case matters |
+| U04 | `test_parse_ignores_noise` | CR, LF, space, `z`, `E`, `o`, `n`, `m`, `0x00`, `0xFF` are ignored — case matters |
 | U05 | `test_speed_clamp_raises_weak_speeds` | 10 %, 30 %, 0 %, −5 % all come out at the floor |
 | U06 | `test_speed_clamp_passes_usable_speeds` | 50/70/100 pass through; 150 caps to 100 |
 | U07 | `test_speed_is_clamped_reports_accurately` | Boundary at exactly 50 % |
@@ -679,7 +708,7 @@ the CMake file fails with a clear message if it is not.
 | U16 | `test_decode_is_robust_to_junk` | `+`→space, truncated `%`, `%A`, `%ZZ`, short-buffer overrun, zero-length buffer |
 | U17 | `test_actuator_commands_are_recognised` | `e`,`r`,`h`,`t`,`+`,`-`,`A`,`B` all count as energising the actuator |
 | U18 | `test_stop_and_queries_are_never_blocked` | **`s` does not energise** — so the interlock can never block STOP; nor do `p`, `d`, speed keys or noise |
-| U19 | `test_the_two_sides_never_overlap` | `n` is the stepper's only energising command, and over all 256 bytes no command is on both sides |
+| U19 | `test_the_two_sides_never_overlap` | `c` and `w` are the stepper's energising commands, `f` is not, and over all 256 bytes no command is on both sides |
 
 ### `auth` suite — request authorisation (spec FR1, FR2)
 
@@ -793,20 +822,26 @@ running the level tests, or the timings will not match.
 | ID | Purpose | Input | Expected output | Expected behaviour |
 | --- | --- | --- | --- | --- |
 | S01 | Stepper off at boot | reset | — | All four pins low; shaft turns freely by hand |
-| S02 | Stepper on | `n` | `Stepper: on, 100 rpm (3000 us/step)` | Turns continuously, ~2 rev/s |
-| S03 | Stepper off releases the coils | `n` then `f` | `Stepper: off (coils released)` | Stops; no holding torque, no warm driver |
-| S04 | `n` twice reports state | `n` `n` | `Stepper: on, 100 rpm, N steps` | Second press changes nothing; N rises ~333/s |
-| S05 | `f` when already off | `f` | `Stepper: off` | No change |
-| S06 | Console stays live while turning | `n`, then `p` | `Level: …` immediately | Stepper still turning — proves non-blocking |
-| S07 | **Actuator refused while stepping** | `n`, then `e` | `Stepper is running -- press f to stop it first` | Actuator does not move; stepper keeps turning |
-| S08 | Every actuator key refused | `n`, then `r`,`h`,`t`,`+`,`-`,`A`,`B` | Same refusal each time | `[A=0 B=0]` throughout |
-| S09 | **Stepper refused while driving** | `e`, then `n` | `Actuator is energised (e, A=…) -- press s first` | Stepper does not start |
-| S10 | Raw hold counts as energised | `s` `A`, then `n` | `Actuator is energised (s, A=256 B=0) …` | The `actuator_is_driving()` case, not `direction != 's'` |
-| S11 | **STOP stops both** | `n`, then `s` | `Stepper off. Direction: s … [A=0 B=0]` | Both motors stop |
-| S12 | Stop is never blocked | `n`, then `s` | Accepted, not refused | The interlock must never gate STOP |
-| S13 | Queries pass the gate | `n`, then `p`, `d`, `5` | Normal replies | None of them energises anything |
-| S14 | Handover works | `n` `f` `e` `s` `n` | Each accepted in turn | Alternating control, no reset needed |
-| S15 | Restart resets the step count | `n` `f` `n` `n` | Second `n n` reports a small N | Count is per run |
+| S02 | Clockwise | `c` | `Stepper: on clockwise, 100 rpm (3000 us/step)` | Turns continuously, ~2 rev/s |
+| S03 | Counter-clockwise | `f` then `w` | `Stepper: on counter-clockwise, …` | **Turns the opposite way to S02** — the direction test |
+| S04 | **Reverse while running** | `c`, then `w` | `Stepper: reversed to counter-clockwise` | Reverses without stopping; no timer restart |
+| S05 | Reverse back | then `c` | `Stepper: reversed to clockwise` | Reverses again, any number of times |
+| S06 | Same direction twice reports state | `c` `c` | `Stepper: on clockwise, 100 rpm, N steps` | Second press changes nothing; N rises ~333/s |
+| S07 | Step count does not unwind on reversal | `c`, note N, `w`, note N again | N keeps rising | Count is "how long turning", not a position |
+| S08 | Stepper off releases the coils | `c` then `f` | `Stepper: off (coils released)` | Stops; no holding torque, no warm driver |
+| S09 | `f` when already off | `f` | `Stepper: off` | No change |
+| S10 | Direction is remembered | `w` `f` then `p`-poll the web status | `stepperDir` stays `ccw` while off | Next start without a direction key would use it |
+| S11 | Console stays live while turning | `c`, then `p` | `Level: …` immediately | Stepper still turning — proves non-blocking |
+| S12 | **Actuator refused while stepping** | `c`, then `e` | `Stepper is running -- press f to stop it first` | Actuator does not move; stepper keeps turning |
+| S13 | Every actuator key refused | `c`, then `r`,`h`,`t`,`+`,`-`,`A`,`B` | Same refusal each time | `[A=0 B=0]` throughout |
+| S14 | **Stepper refused while driving** | `e`, then `c` — and again with `w` | `Actuator is energised (e, A=…) -- press s first` | Neither direction starts |
+| S15 | Raw hold counts as energised | `s` `A`, then `c` | `Actuator is energised (s, A=256 B=0) …` | The `actuator_is_driving()` case, not `direction != 's'` |
+| S16 | **STOP stops both** | `c`, then `s` | `Stepper off. Direction: s … [A=0 B=0]` | Both motors stop |
+| S17 | Stop is never blocked | `c`, then `s` | Accepted, not refused | The interlock must never gate STOP |
+| S18 | Queries pass the gate | `c`, then `p`, `d`, `5` | Normal replies | None of them energises anything |
+| S19 | Handover works | `c` `f` `e` `s` `w` | Each accepted in turn | Alternating control, no reset needed |
+| S20 | Restart resets the step count | `c` `f` `c` `c` | Second `c c` reports a small N | Count is per run, reset by a start from idle, not by a reversal |
+| S21 | A revolution is 200 steps | `c`, mark the shaft, watch N | One turn per 200 steps | Confirms `BOARD_STEPPER_STEPS_PER_REV` against your motor |
 
 ### Web UI
 
@@ -835,11 +870,13 @@ running the level tests, or the timings will not match.
 | W21 | Dead-man covers authorised clients | `tools/dock_cli.py deadman --yes` | `STOP: web client stopped responding` | Stops ~1.5 s after the last poll |
 | W22 | Unauthorised poll cannot pet the dead-man | start a move, then poll unsigned | Stop still fires | 401s do not count as liveness |
 | W23 | Serial does not arm the dead-man | drive with `e` over serial only, wait | No stop | Technician is not interrupted |
-| W24 | Stepper from the web | tap **Turn on** | Stepper turns; status row reads `on · 100 rpm · N steps` | Serial log shows `web: n -> Stepper: on…` |
-| W25 | Interlock shown in the page | tap **Turn on** | Position and Manual buttons grey out, STOP does not | Advisory only; the dock refuses regardless |
-| W26 | **Dead-man covers the stepper** | tap **Turn on**, then close the browser tab | Stepper stops within ~1.5 s | `STOP: web client stopped responding` |
-| W27 | Web STOP stops both | tap **Turn on**, then **STOP** | Both motors stop | Same `s` byte as serial |
-| W28 | Scan refused while stepping | tap **Turn on**, then **Scan for networks** | `Scan refused: stop the motors before scanning…` | 409; no sweep started |
+| W24 | Stepper from the web | tap **↻ Clockwise** | Stepper turns; status row reads `↻ clockwise · 100 rpm · N steps` | Serial log shows `web: c -> Stepper: on clockwise…` |
+| W25 | Both directions from the web | tap **↺ Counter** | Turns the other way; row reads `↺ counter-clockwise` | Same path as `w` on serial |
+| W26 | **Reverse from the web** | while turning CW, tap **↺ Counter** | Reverses; the CW button becomes live and CCW greys out | Only the running direction is disabled |
+| W27 | Interlock shown in the page | tap either direction | Position and Manual buttons grey out, STOP does not | Advisory only; the dock refuses regardless |
+| W28 | **Dead-man covers the stepper** | tap a direction, then close the browser tab | Stepper stops within ~1.5 s | `STOP: web client stopped responding` |
+| W29 | Web STOP stops both | tap a direction, then **STOP** | Both motors stop | Same `s` byte as serial |
+| W30 | Scan refused while stepping | tap a direction, then **Scan for networks** | `Scan refused: stop the motors before scanning…` | 409; no sweep started |
 
 ### Networking (Phase 2)
 
@@ -928,10 +965,14 @@ have:
 - **A state machine.** Commands act immediately and there is no notion of a
   safe position. The one interlock that exists — actuator *or* stepper, never
   both — is a guard on a single pair of resources, not a sequencer.
-- **Stepper position.** The stepper runs in one direction, open-loop, with no
+- **Stepper position.** The stepper turns either way, but open-loop, with no
   calibration and no step target. The step count is a progress readout, not a
-  position: nothing detects a missed step, and the coils are released on stop,
-  so the shaft can be moved by hand between runs.
+  position: it counts steps taken rather than net rotation, nothing detects a
+  missed step, and the coils are released on stop, so the shaft can be moved by
+  hand between runs.
+- **Stepper ramping.** Start, stop and reversal are all abrupt. At 100 RPM with
+  a light load that is fine; under load, or faster, a reversal can slip steps
+  and nothing notices. A real axis wants acceleration ramps and feedback.
 - **Unit tests beyond `command` and `auth`.** `actuator` and `positioner` talk
   to hardware
   directly, so the level arithmetic and timed-move sequencing are only covered

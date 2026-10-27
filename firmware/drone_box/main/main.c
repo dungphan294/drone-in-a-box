@@ -13,7 +13,7 @@
 //   5..9 = speed 50%..90%, 0 = full speed (100%); 1..4 clamp to 50%
 //   h = home retracted (level 0), t = top extended (level 5)
 //   +/- = move one level and stop, p = show level
-//   n = stepper on, f = stepper off
+//   c = stepper clockwise, w = stepper counter-clockwise, f = stepper off
 //   d = toggle slow/fast decay, A/B = hold one pin high (diagnostic)
 //
 // This file is wiring only. The work lives in the components:
@@ -92,8 +92,9 @@ static void banner(void)
     printf("Decay: slow (brake off-phase). Press d to toggle fast/slow.\n");
     printf("Level: h = home retracted, t = top extended, +/- = one step, p = show\n");
     printf("       %d steps of %d ms over a %d ms stroke\n", LEVELS, STEP_MS, TRAVEL_MS);
-    printf("Step:  n = stepper on, f = stepper off -- %d steps/rev at %d rpm\n",
-           STEPPER_STEPS_PER_REV, STEPPER_RPM);
+    printf("Step:  c = clockwise, w = counter-clockwise, f = off"
+           " -- %d steps/rev at %d rpm\n", STEPPER_STEPS_PER_REV, STEPPER_RPM);
+    printf("       pressing the other direction reverses it where it stands, no ramp\n");
     printf("       one motor at a time: the dock refuses either while the other runs\n");
     printf("PWM:   %lu Hz on %s\n",
            (unsigned long)actuator_pwm_freq(), serial_io_transport_name());
