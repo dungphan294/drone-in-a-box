@@ -1,3 +1,10 @@
+# The chip. Without this, a build from a fresh clone -- CI, a new machine, a
+# container -- silently targets plain esp32 and rewrites dependencies.lock's
+# `target:` field on its way past. Everything here assumes the S3: GPIO19/20
+# are its native USB pins, ADC2 is the one Wi-Fi takes, LEDC has low-speed
+# channels only, and there is no Bluetooth Classic.
+CONFIG_IDF_TARGET="esp32s3"
+
 # Console on UART0, i.e. the board's UART-bridge USB port (CH343/CP2102).
 # If you move the cable to the S3's native USB port, swap these two lines:
 #   CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
