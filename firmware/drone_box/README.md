@@ -117,6 +117,52 @@ In VS Code, use **Build, Flash and Monitor** (🔥) — it sequences the port
 handoff. A separate Serial Monitor holding the port makes flashing fail with
 `Resource busy`; stop it first.
 
+### Build in Docker, with no toolchain installed
+
+```bash
+tools/docker-build.sh check        # host unit tests, then idf.py build
+tools/docker-build.sh build
+tools/docker-build.sh test
+tools/docker-build.sh shell        # a prompt inside the container, IDF ready
+tools/docker-build.sh menuconfig
+tools/docker-build.sh clean
+```
+
+The toolchain is a 2 GB install pinned to one IDF version, and *"it builds on
+my machine"* has already cost this project a bug. The container is the same on
+a Mac, on a Linux box and in CI, so a green build in it means the same thing
+everywhere — which is the point.
+
+`IDF_VERSION` is **pinned to v6.0.2**, not `latest`, in both
+`tools/docker-build.sh` and `.devcontainer/Dockerfile`. `dependencies.lock` is
+resolved against it and `actuator.c` has an `#if` ladder that only knows the
+duty resolutions it offers, so a silent jump to a new major is a compile error
+at best. Override deliberately: `IDF_VERSION=v6.0.3 tools/docker-build.sh build`.
+
+Two details that matter in practice:
+
+* The container runs as **your** uid, so the files it writes are not owned by
+  root. Skip that and the next host-side `git status` is a mess of
+  unwritable artifacts.
+* Managed components (`espressif/mdns`) are cached in a named Docker volume,
+  so a rebuild does not re-download them and a flaky network does not fail it.
+
+> **Flashing is not in the script, and that is not an omission.** Docker
+> Desktop on macOS and Windows cannot pass a USB serial device into a
+> container, so `idf.py flash` and `monitor` have to run on the host. Build in
+> the container, flash from the host:
+>
+> ```bash
+> tools/docker-build.sh build
+> idf.py -p /dev/cu.usbmodem* flash monitor     # host IDF install
+> # or, with no IDF on the host:
+> pip install esptool
+> esptool.py -p /dev/cu.usbmodem* write_flash @build/flash_args
+> ```
+>
+> On Linux, add `--device=/dev/ttyUSB0` to `DOCKER_RUN_ARGS` and flashing
+> works from inside.
+
 ### Console transport
 
 The console follows `menuconfig` → *Component config* → *ESP System Settings* →
