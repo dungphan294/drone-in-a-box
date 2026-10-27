@@ -59,6 +59,20 @@ if [ -t 0 ]; then
     DOCKER_RUN_ARGS+=(--interactive --tty)
 fi
 
+# Passed through when set, for a sandbox or CI runner that cannot reach the
+# component registry: IDF_COMPONENT_MANAGER=0 skips the managed dependency, and
+# wifi_link.c's `#if __has_include("mdns.h")` falls back to answering on the IP
+# address instead of dock.local. It builds and it runs, but it is a reduced
+# build -- do not ship from it without checking the real one.
+#
+#   IDF_COMPONENT_MANAGER=0 tools/docker-build.sh check
+#
+# An `if`, again: `[ -n ... ] && arr+=(...)` would exit the script under
+# `set -e` whenever the variable is unset, which is the normal case.
+if [ -n "${IDF_COMPONENT_MANAGER:-}" ]; then
+    DOCKER_RUN_ARGS+=(--env "IDF_COMPONENT_MANAGER=${IDF_COMPONENT_MANAGER}")
+fi
+
 # A fresh named volume is root-owned, and we run as the invoking user, so HOME
 # would be read-only and the component-manager cache could not be written.
 # Chown it once, as root, and leave a marker: -R over a populated cache on
