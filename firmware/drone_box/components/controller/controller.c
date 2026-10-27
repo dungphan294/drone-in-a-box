@@ -10,6 +10,7 @@
 #include "secrets.h"
 #include "actuator.h"
 #include "positioner.h"
+#include "stepper_motor.h"
 
 static char s_last_event[CONTROLLER_REPLY_MAX] = "ready";
 
@@ -36,6 +37,16 @@ static void describe_actuator(char *out, size_t n)
     snprintf(out, n, "Direction: %c, speed: %d%%  [A=%lu B=%lu]",
              actuator_direction(), actuator_speed_pct(),
              (unsigned long)actuator_duty_a(), (unsigned long)actuator_duty_b());
+}
+
+static void describe_stepper(char *out, size_t n)
+{
+    if (stepper_motor_running()) {
+        snprintf(out, n, "Stepper: on, %d rpm, %llu steps",
+                 STEPPER_RPM, (unsigned long long)stepper_motor_steps());
+    } else {
+        snprintf(out, n, "Stepper: off");
+    }
 }
 
 static void describe_level(char *out, size_t n)
@@ -65,6 +76,7 @@ void controller_init(void)
     s_lock = xSemaphoreCreateRecursiveMutex();
     configASSERT(s_lock);
     actuator_init();                        // actuator off before anything can command it
+    stepper_motor_init();                   // and the stepper's coils released
     positioner_init(on_move_due);
 }
 
@@ -83,13 +95,41 @@ static bool handle_locked(uint8_t c, char *reply, size_t reply_len)
     const command_t cmd = command_parse(c);
     reply[0] = '\0';
 
+    // The interlock: one mechanism, one supply, so one motor at a time.
+    //
+    // Both halves are refusals rather than a silent takeover. A command that
+    // stopped the other motor to get its turn would mean a mistyped key could
+    // halt a lift mid-travel, and dead reckoning would be lost with it -- so
+    // the operator is told what is in the way and stops it deliberately.
+    //
+    // This gate covers the actuator side for every client at once, because
+    // serial, HTTP and BLE all arrive here. The stepper side is in the
+    // CMD_STEPPER case below, which has to say *which* motor is in the way.
+    if (command_energises_actuator(cmd) && stepper_motor_running()) {
+        snprintf(reply, reply_len, "Stepper is running -- press f to stop it first");
+        note(reply);
+        return true;
+    }
+
     switch (cmd.kind) {
 
-    case CMD_DIRECTION:
+    case CMD_DIRECTION: {
         positioner_cancel();                // manual jog: position no longer known
+        // STOP means the whole mechanism. An operator reaching for it does not
+        // care which motor is turning, and 's' is the key every client's STOP
+        // button sends -- including the one the dead-man fires.
+        const bool stepper_was_on = (cmd.value == 's') && stepper_motor_stop();
         actuator_set((char)cmd.value, actuator_speed_pct());
-        describe_actuator(reply, reply_len);
+
+        char state[CONTROLLER_REPLY_MAX];
+        describe_actuator(state, sizeof(state));
+        if (stepper_was_on) {
+            snprintf(reply, reply_len, "Stepper off. %s", state);
+        } else {
+            snprintf(reply, reply_len, "%s", state);
+        }
         break;
+    }
 
     case CMD_SPEED:
         // A timed move only knows where it is because it runs at
@@ -160,6 +200,37 @@ static bool handle_locked(uint8_t c, char *reply, size_t reply_len)
                  actuator_pin_name((char)cmd.value));
         break;
 
+    case CMD_STEPPER:
+        if (cmd.value == 'f') {
+            if (stepper_motor_stop()) {
+                snprintf(reply, reply_len, "Stepper: off (coils released)");
+            } else {
+                describe_stepper(reply, reply_len);   // already off: say so with the state
+            }
+            break;
+        }
+        // The interlock from the stepper's side. actuator_is_driving() rather
+        // than actuator_direction(), so a diagnostic raw hold counts as busy.
+        if (actuator_is_driving() || positioner_moving()) {
+            // The duties as well as the direction: after a raw hold the
+            // direction reads 's' and only the duties show what is going on.
+            snprintf(reply, reply_len,
+                     "Actuator is energised (%c, A=%lu B=%lu) -- press s first",
+                     actuator_direction(),
+                     (unsigned long)actuator_duty_a(), (unsigned long)actuator_duty_b());
+            break;
+        }
+        if (stepper_motor_start()) {
+            snprintf(reply, reply_len, "Stepper: on, %d rpm (%lu us/step)",
+                     STEPPER_RPM, (unsigned long)STEPPER_STEP_INTERVAL_US);
+        } else {
+            // Already running, so there is nothing to do but report -- which
+            // doubles as the only way to ask the stepper's state from a
+            // console that has no query key of its own.
+            describe_stepper(reply, reply_len);
+        }
+        break;
+
     case CMD_REVEAL_KEY:
         controller_reveal_key();
         snprintf(reply, reply_len, "device key printed above");
@@ -200,12 +271,15 @@ void controller_status_json(char *out, size_t out_len)
     snprintf(out, out_len,
              "{\"dir\":\"%c\",\"speed\":%d,\"dutyA\":%lu,\"dutyB\":%lu,"
              "\"level\":%d,\"levels\":%d,\"moving\":%s,\"slowDecay\":%s,"
+             "\"stepper\":%s,\"stepperRpm\":%d,\"stepperSteps\":%llu,"
              "\"levelText\":\"%s\",\"event\":\"%s\"}",
              actuator_direction(), actuator_speed_pct(),
              (unsigned long)actuator_duty_a(), (unsigned long)actuator_duty_b(),
              level, LEVELS,
              positioner_moving() ? "true" : "false",
              actuator_slow_decay() ? "true" : "false",
+             stepper_motor_running() ? "true" : "false",
+             STEPPER_RPM, (unsigned long long)stepper_motor_steps(),
              level_text, s_last_event);
     UNLOCK();
 }
@@ -227,6 +301,7 @@ void controller_emergency_stop(const char *why)
     LOCK();
     positioner_cancel();
     actuator_set('s', actuator_speed_pct());
+    stepper_motor_stop();                   // the dead-man covers both motors
     note(why);
     UNLOCK();
     printf("STOP: %s\n", why);
